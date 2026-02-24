@@ -9,6 +9,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/imgproc.hpp>
 
+#include <cmath>
 #include <boost/ptr_container/ptr_list.hpp>
 
 // CCTag
@@ -28,9 +29,18 @@ public:
     use_cuda_ = this->declare_parameter<bool>("use_cuda", false);
 
     detections_topic_ = this->declare_parameter<std::string>("detections_topic", "cctag/detections");
+    visualization_topic_ = this->declare_parameter<std::string>(
+      "visualization_topic", "cctag/visualization");
+    enable_visualization_ = this->declare_parameter<bool>("enable_visualization", true);
 
     det_pub_ = this->create_publisher<vision_msgs::msg::Detection2DArray>(
       detections_topic_, rclcpp::QoS(10));
+
+    if (enable_visualization_) {
+      vis_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+        visualization_topic_, rclcpp::QoS(10));
+      RCLCPP_INFO(get_logger(), "Publishing visualization: %s", visualization_topic_.c_str());
+    }
 
     // SensorDataQoS is typical for camera streams.
     img_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -120,15 +130,61 @@ private:
     }
 
     det_pub_->publish(out);
+
+    // Publish visualization: camera image with drawn detections (ellipses + IDs).
+    if (enable_visualization_ && vis_pub_) {
+      cv::Mat vis;
+      if (src.channels() == 1) {
+        cv::cvtColor(src, vis, cv::COLOR_GRAY2BGR);
+      } else {
+        vis = src.clone();
+      }
+
+      const cv::Scalar color_ellipse(0, 255, 0);   // green (BGR)
+      const cv::Scalar color_text(0, 255, 0);     // green
+      const int thickness = 2;
+      const double font_scale = 0.6;
+
+      for (const auto & marker : markers) {
+        if (marker.getStatus() != 1) {
+          continue;
+        }
+        const auto & e = marker.rescaledOuterEllipse();
+        const cv::Point2d center(marker.x(), marker.y());
+        const cv::Size2d axes(e.a(), e.b());
+        // OpenCV ellipse angle in degrees, counter-clockwise.
+        const double angle_deg = e.angle() * 180.0 / M_PI;
+        cv::ellipse(vis, center, axes, angle_deg, 0.0, 360.0, color_ellipse, thickness);
+
+        const std::string label = std::to_string(marker.id());
+        int baseline = 0;
+        const cv::Size text_sz = cv::getTextSize(
+          label, cv::FONT_HERSHEY_SIMPLEX, font_scale, 1, &baseline);
+        cv::putText(
+          vis, label,
+          cv::Point(static_cast<int>(center.x - text_sz.width / 2),
+                    static_cast<int>(center.y + text_sz.height / 2)),
+          cv::FONT_HERSHEY_SIMPLEX, font_scale, color_text, 1, cv::LINE_AA);
+      }
+
+      std_msgs::msg::Header header = msg->header;
+      if (!frame_id_override_.empty()) {
+        header.frame_id = frame_id_override_;
+      }
+      const std::string encoding = (vis.channels() == 3) ? "bgr8" : "mono8";
+      vis_pub_->publish(*cv_bridge::CvImage(header, encoding, vis).toImageMsg());
+    }
   }
 
   // Params
   std::string image_topic_;
   std::string detections_topic_;
+  std::string visualization_topic_;
   std::string frame_id_override_;
   std::size_t n_rings_{3};
   int pipe_id_{0};
   bool use_cuda_{false};
+  bool enable_visualization_{true};
 
   // State
   std::atomic<std::size_t> frame_counter_{0};
@@ -136,6 +192,7 @@ private:
   // ROS
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
   rclcpp::Publisher<vision_msgs::msg::Detection2DArray>::SharedPtr det_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr vis_pub_;
 };
 
 int main(int argc, char ** argv)
