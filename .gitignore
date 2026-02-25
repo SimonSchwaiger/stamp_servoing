@@ -1,2 +1,4 @@
 *.ipynb_checkpoints
 src/cctag/third_party/*
+cache/*
+lab/*

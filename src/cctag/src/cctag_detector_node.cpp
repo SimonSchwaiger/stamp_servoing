@@ -21,7 +21,7 @@ public:
   CCTagDetectorNode()
   : Node("cctag_detector_node")
   {
-    image_topic_ = this->declare_parameter<std::string>("image_topic", "/camera/color/image_raw");
+    image_topic_ = this->declare_parameter<std::string>("image_topic", "/oak/rgb/image_raw");
     frame_id_override_ = this->declare_parameter<std::string>("frame_id_override", "");
 
     n_rings_ = static_cast<std::size_t>(this->declare_parameter<int>("n_rings", 3));

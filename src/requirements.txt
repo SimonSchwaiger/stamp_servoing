@@ -1,0 +1,5 @@
+scikit-learn
+opencv-python-headless
+--extra-index-url https://download.pytorch.org/whl/cpu # change to cuxx for cuda
+torch==2.6.0
+torchvision==0.21.0
